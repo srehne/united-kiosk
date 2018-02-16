@@ -1,0 +1,169 @@
+var page = require('webpage').create(),
+  system = require('system'), fs = require('fs'),
+  args = require('system').args,
+  t, waitTime, totalHTML;
+
+/**
+ * Wait until the test condition is true or a timeout occurs. Useful for waiting
+ * on a server response or for a ui change (fadeIn, etc.) to occur.
+ *
+ * @param testFx javascript condition that evaluates to a boolean,
+ * it can be passed in as a string (e.g.: "1 == 1" or "$('#bar').is(':visible')" or
+ * as a callback function.
+ * @param onReady what to do when testFx condition is fulfilled,
+ * it can be passed in as a string (e.g.: "1 == 1" or "$('#bar').is(':visible')" or
+ * as a callback function.
+ * @param timeOutMillis the max amount of time to wait. If not specified, 3 sec is used.
+ */
+
+function waitTimer(onReady, timeOutMillis) {
+  var maxtimeOutMillis = timeOutMillis ? timeOutMillis : 3000, //< Default Max Timout is 3s
+    start = new Date().getTime(),
+    interval = setInterval(function() {
+      if ( (new Date().getTime() - start >= maxtimeOutMillis) ) {
+        typeof(onReady) === "string" ? eval(onReady) : onReady(); //< Do what it's supposed to do once the condition is fulfilled
+        clearInterval(interval); //< Stop this interval
+      }
+    }, 200); //< repeat check every 250ms
+};
+
+function waitFor(testFx, onReady, timeOutMillis) {
+  var maxtimeOutMillis = timeOutMillis ? timeOutMillis : 3000, //< Default Max Timout is 3s
+    start = new Date().getTime(),
+    condition = false,
+    interval = setInterval(function() {
+      if ( (new Date().getTime() - start < maxtimeOutMillis) && !condition ) {
+        // If not time-out yet and condition not yet fulfilled
+        condition = (typeof(testFx) === "string" ? eval(testFx) : testFx()); //< defensive code
+      } else {
+        if(!condition) {
+          // If condition still not fulfilled (timeout but condition is 'false')
+          //                    console.log("'waitFor()' timeout");
+          phantom.exit(1);
+        } else {
+          // Condition fulfilled (timeout and/or condition is 'true')
+          //                    console.log("'waitFor()' finished in " + (new Date().getTime() - start) + "ms.");
+          typeof(onReady) === "string" ? eval(onReady) : onReady(); //< Do what it's supposed to do once the condition is fulfilled
+          clearInterval(interval); //< Stop this interval
+        }
+      }
+    }, 250); //< repeat check every 250ms
+};
+
+var myType = args[1];
+var myWord = args[2];
+
+totalHTML = '<!-- .............. PHANTOM START HTML ..............-->';
+
+waitTime = 20000;
+
+page.settings.resourceTimeout = 20000;
+var address = "https://motorregister.skat.dk/dmr-front/appmanager/skat/dmr?_nfpb=true&_nfpb=true&_pageLabel=vis_koeretoej_side&_nfls=false";
+
+page.open(address, function(status) {
+  if (status !== 'success') {
+    console.log('<!-- .............. PHANTOM ERROR LOADING PAGE ..............-->');
+    console.log(page);
+  } else {
+
+    waitFor(function() {
+      return page.evaluate(function() {
+        var myStr = document.body.innerHTML.toString();
+        if( (myStr.indexOf('Registrerings') > -1) && (myStr.indexOf('Stelnummer') > -1)  && (myStr.indexOf('Ring til SKAT') > -1) && (myStr.indexOf('som matcher, det du har indtastet, kommer du til') > -1) ) {
+          return true;
+        } else {
+          return false;
+        };
+      });
+    }, function() {
+
+      var ua = page.evaluate( function( aType, aWord) {
+        window.document.getElementById( aType ).checked = true;
+        window.document.getElementById('soegeord').value = aWord;
+        window.document.getElementById('fremsoegKtBtn').click();
+      }, myType, myWord );
+
+
+      waitFor(function() {
+        // Check in the page if a specific element is now visible
+        return page.evaluate(function() {
+          var myStr = document.body.innerHTML.toString();
+//          if(myStr.indexOf('Registrerings-forhold') > -1){
+          if(myStr.indexOf('Blokeringsstatus') > -1){
+            return true;
+          } else {
+            if(myStr.indexOf('Ingen køretøjer fundet') > -1){
+              return true;
+            } else {
+              return false;
+            };
+          };
+        });
+      }, function() {
+        totalHTML = totalHTML+'<!-- .............. PHANTOM HTML PAGE 1 ..............-->';
+
+        totalHTML = totalHTML + page.evaluate(function() {
+            return document.body.innerHTML.toString();
+          });
+
+        if( totalHTML.indexOf('Ingen køretøjer fundet') > -1) {
+          console.log(totalHTML)
+          phantom.exit();
+        };
+
+        var ua = page.evaluate(function() {
+          document.getElementById('tabSetNextBtn').click();
+
+        });
+
+        waitFor(function() {
+          return page.evaluate(function() {
+            var myStr = document.body.innerHTML.toString();
+            if(myStr.indexOf('Teknisk totalvægt') > -1){
+              return true;
+            } else {
+              return false;
+            };
+          });
+
+        }, function() {
+          totalHTML=totalHTML+'<!-- .............. PHANTOM HTML PAGE 2 ..............-->';
+
+          totalHTML = totalHTML + page.evaluate(function() {
+              return document.body.innerHTML.toString();
+            });
+
+          var ua = page.evaluate(function() {
+            document.getElementById('tabSetNextBtn').click();
+
+          });
+
+          waitFor(function() {
+            return page.evaluate(function() {
+              var myStr = document.body.innerHTML.toString();
+              if(myStr.indexOf('Seneste synsresultat') > -1){
+                return true;
+              } else {
+                return false;
+              };
+            });
+          }, function() {
+            totalHTML=totalHTML+'<!-- .............. PHANTOM HTML PAGE 3 ..............-->';
+
+            totalHTML = totalHTML + page.evaluate(function() {
+                return document.body.innerHTML.toString();
+              });
+
+            totalHTML=totalHTML+'<!-- .............. PHANTOM END OF HTML ..............-->';
+
+            //fs.write( 'myres.html', totalHTML, 'w');
+            //                    page.render('screenshot3.png');
+            console.log(totalHTML);
+            var a = page.render('result.png'), b = phantom.exit();
+
+          }, waitTime);
+        }, waitTime);
+      }, waitTime);
+    }, waitTime);
+  };
+});
